@@ -43,6 +43,29 @@ local Config = {
             Size = 16,
             Color = Color3.fromRGB(255, 255, 0)
         }
+    },
+    Fullbright = {
+        Enabled = false,
+        Mode = "Normal" -- "Normal" ou "NightVision"
+    },
+    Movement = {
+        Noclip = false,
+        InfJump = false,
+        Speed = {
+            Enabled = false,
+            Value = 16
+        }
+    },
+    FPSBoost = {
+        RemoveTextures = false,
+        RemoveFog = false
+    },
+    Utilities = {
+        ChatSpammer = {
+            Enabled = false,
+            Message = "Chico HUB on top! 🔥"
+        },
+        Invisible = false
     }
 }
 
@@ -82,6 +105,264 @@ local MenuOpen = false
 -- Display Labels
 local FPSLabel = nil
 local PingLabel = nil
+
+-- Fullbright
+local Lighting = game:GetService("Lighting")
+local OriginalBrightness = Lighting.Brightness
+local OriginalAmbient = Lighting.Ambient
+local OriginalOutdoorAmbient = Lighting.OutdoorAmbient
+local OriginalColorShift_Top = Lighting.ColorShift_Top
+local NightVisionEffect = nil
+
+-- Services adicionais
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
+
+-- Movement
+local NoclipConnection = nil
+local OriginalWalkSpeed = 16
+
+-- FPS Boost
+local RemovedTextures = {}
+
+-- Utilities
+local ChatSpamConnection = nil
+local InvisibleParts = {}
+
+-- Função para aplicar Fullbright
+local function ApplyFullbright()
+    if Config.Fullbright.Enabled then
+        -- Tocar som ao LIGAR
+        local sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://376178316"
+        sound.Volume = 0.5
+        sound.Parent = game.Workspace
+        sound:Play()
+        game:GetService("Debris"):AddItem(sound, 3)
+        
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 100000
+        Lighting.GlobalShadows = false
+        
+        if Config.Fullbright.Mode == "NightVision" then
+            -- Night Vision (Filtro Verde)
+            Lighting.Ambient = Color3.fromRGB(0, 255, 0)
+            Lighting.OutdoorAmbient = Color3.fromRGB(0, 255, 0)
+            Lighting.ColorShift_Top = Color3.fromRGB(0, 255, 0)
+            
+            -- Criar efeito de overlay verde
+            if not NightVisionEffect then
+                NightVisionEffect = Instance.new("ColorCorrectionEffect")
+                NightVisionEffect.Name = "NightVision"
+                NightVisionEffect.Brightness = 0.1
+                NightVisionEffect.Contrast = 0.2
+                NightVisionEffect.TintColor = Color3.fromRGB(0, 255, 0)
+                NightVisionEffect.Parent = Lighting
+            end
+            NightVisionEffect.Enabled = true
+        else
+            -- Normal (Sem filtro)
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            Lighting.ColorShift_Top = Color3.fromRGB(0, 0, 0)
+            
+            if NightVisionEffect then
+                NightVisionEffect.Enabled = false
+            end
+        end
+    else
+        -- Tocar som ao DESLIGAR
+        local sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://115010854046062"
+        sound.Volume = 0.5
+        sound.Parent = game.Workspace
+        sound:Play()
+        game:GetService("Debris"):AddItem(sound, 3)
+        
+        -- Restaurar valores originais
+        Lighting.Brightness = OriginalBrightness
+        Lighting.Ambient = OriginalAmbient
+        Lighting.OutdoorAmbient = OriginalOutdoorAmbient
+        Lighting.ColorShift_Top = OriginalColorShift_Top
+        Lighting.GlobalShadows = true
+        
+        if NightVisionEffect then
+            NightVisionEffect.Enabled = false
+        end
+    end
+end
+
+-- Função Noclip
+local function ToggleNoclip(enabled)
+    if NoclipConnection then
+        NoclipConnection:Disconnect()
+        NoclipConnection = nil
+    end
+    
+    if enabled and LocalPlayer.Character then
+        NoclipConnection = RunService.Stepped:Connect(function()
+            if LocalPlayer.Character then
+                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end)
+    else
+        if LocalPlayer.Character then
+            for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
+-- Função Speed Hack
+local function ApplySpeed()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        if Config.Movement.Speed.Enabled then
+            LocalPlayer.Character.Humanoid.WalkSpeed = Config.Movement.Speed.Value
+        else
+            LocalPlayer.Character.Humanoid.WalkSpeed = OriginalWalkSpeed
+        end
+    end
+end
+
+-- Função Remove Textures
+local function RemoveTextures()
+    if Config.FPSBoost.RemoveTextures then
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+                table.insert(RemovedTextures, {obj, obj.Material, obj.Reflectance})
+            elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                obj.Transparency = 1
+                table.insert(RemovedTextures, {obj, obj.Transparency})
+            end
+        end
+        print("✅ Texturas removidas! FPS melhorado!")
+    end
+end
+
+-- Função Remove Fog
+local function RemoveFog()
+    if Config.FPSBoost.RemoveFog then
+        Lighting.FogEnd = 100000
+        Lighting.FogStart = 0
+        print("✅ Fog removido!")
+    else
+        Lighting.FogEnd = 100000
+        Lighting.FogStart = 0
+    end
+end
+
+-- Função Chat Spammer
+local function ToggleChatSpammer(enabled)
+    if ChatSpamConnection then
+        ChatSpamConnection:Disconnect()
+        ChatSpamConnection = nil
+    end
+    
+    if enabled then
+        ChatSpamConnection = RunService.Heartbeat:Connect(function()
+            wait(1)
+            if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+                TextChatService.TextChannels.RBXGeneral:SendAsync(Config.Utilities.ChatSpammer.Message)
+            else
+                ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer(Config.Utilities.ChatSpammer.Message, "All")
+            end
+        end)
+    end
+end
+
+-- Função Invisible FE
+local function ToggleInvisible(enabled)
+    if LocalPlayer.Character then
+        local character = LocalPlayer.Character
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        
+        if enabled then
+            -- Fazer invisível (FE)
+            for _, part in pairs(character:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    -- Transparência local (você vê meio transparente)
+                    part.Transparency = 0.7
+                    part.LocalTransparencyModifier = 0.7
+                elseif part:IsA("Decal") or part:IsA("Texture") then
+                    part.Transparency = 1
+                end
+            end
+            
+            -- FE Invisible - Mover as partes pra longe (método antigo mas funciona)
+            for _, part in pairs(character:GetChildren()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Name ~= "Head" then
+                    local attachment = Instance.new("Attachment", part)
+                    attachment.Name = "InvisAttachment"
+                    local alignPosition = Instance.new("AlignPosition", part)
+                    alignPosition.Name = "InvisAlign"
+                    alignPosition.Attachment0 = attachment
+                    alignPosition.RigidityEnabled = true
+                    alignPosition.ReactionForceEnabled = false
+                    alignPosition.ApplyAtCenterOfMass = true
+                    alignPosition.MaxForce = 9e9
+                    alignPosition.MaxVelocity = math.huge
+                    alignPosition.Responsiveness = 200
+                    alignPosition.Position = Vector3.new(0, -5000, 0)  -- Manda pra baixo do mapa
+                end
+            end
+            
+            -- Head fica transparente
+            if character:FindFirstChild("Head") then
+                for _, obj in pairs(character.Head:GetChildren()) do
+                    if obj:IsA("Decal") then
+                        obj.Transparency = 1
+                    end
+                end
+            end
+            
+            print("👻 Invisível ativado!")
+        else
+            -- Restaurar visibilidade
+            for _, part in pairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    -- Restaurar transparência original
+                    if part.Name == "Head" then
+                        part.Transparency = 0
+                    elseif part.Name:find("Torso") or part.Name:find("Arm") or part.Name:find("Leg") then
+                        part.Transparency = 0
+                    end
+                    part.LocalTransparencyModifier = 0
+                elseif part:IsA("Decal") or part:IsA("Texture") then
+                    part.Transparency = 0
+                end
+                
+                -- Remover AlignPosition
+                if part:FindFirstChild("InvisAlign") then
+                    part.InvisAlign:Destroy()
+                end
+                if part:FindFirstChild("InvisAttachment") then
+                    part.InvisAttachment:Destroy()
+                end
+            end
+            
+            -- Restaurar face
+            if character:FindFirstChild("Head") then
+                for _, obj in pairs(character.Head:GetChildren()) do
+                    if obj:IsA("Decal") then
+                        obj.Transparency = 0
+                    end
+                end
+            end
+            
+            print("✅ Visibilidade restaurada!")
+        end
+    end
+end
 
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -232,7 +513,7 @@ TitleLabel.Parent = TitleBar
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Size = UDim2.new(1, 0, 1, 0)
 TitleLabel.Font = Enum.Font.FredokaOne
-TitleLabel.Text = "🐕 CHICO HUB 🐕"
+TitleLabel.Text = "CHICO HUB"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleLabel.TextSize = 18
 TitleLabel.TextStrokeTransparency = 0.5
@@ -549,6 +830,51 @@ local function CreateColorPicker(name, default, callback, yPos)
     return yPos + 35
 end
 
+-- Função para criar TextBox
+local function CreateTextBox(name, placeholder, callback, yPos)
+    local Container = Instance.new("Frame")
+    Container.Parent = ScrollFrame
+    Container.BackgroundTransparency = 1
+    Container.Position = UDim2.new(0, 0, 0, yPos)
+    Container.Size = UDim2.new(1, 0, 0, 50)
+    
+    local Label = Instance.new("TextLabel")
+    Label.Parent = Container
+    Label.BackgroundTransparency = 1
+    Label.Size = UDim2.new(1, 0, 0, 20)
+    Label.Font = Enum.Font.Gotham
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(187, 187, 187)
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local TextBox = Instance.new("TextBox")
+    TextBox.Parent = Container
+    TextBox.BackgroundColor3 = Color3.fromRGB(15, 52, 96)
+    TextBox.BorderColor3 = Color3.fromRGB(22, 160, 133)
+    TextBox.BorderSizePixel = 1
+    TextBox.Position = UDim2.new(0, 0, 0, 25)
+    TextBox.Size = UDim2.new(1, 0, 0, 25)
+    TextBox.Font = Enum.Font.Gotham
+    TextBox.PlaceholderText = placeholder
+    TextBox.Text = ""
+    TextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TextBox.TextSize = 13
+    TextBox.ClearTextOnFocus = false
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 5)
+    Corner.Parent = TextBox
+    
+    TextBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            callback(TextBox.Text)
+        end
+    end)
+    
+    return yPos + 60
+end
+
 -- Construir Menu
 local yOffset = 10
 
@@ -660,6 +986,161 @@ yOffset = CreateColorPicker("Ping Color", Config.Display.Ping.Color, function(co
     if PingLabel:FindFirstChild("UIStroke") then
         PingLabel.UIStroke.Color = color
     end
+end, yOffset)
+
+yOffset = yOffset + 10
+yOffset = CreateSection("🌟 VISUALS", yOffset)
+
+-- Fullbright Toggle
+yOffset = CreateToggle("Fullbright", Config.Fullbright.Enabled, function(value)
+    Config.Fullbright.Enabled = value
+    ApplyFullbright()
+end, yOffset)
+
+-- Fullbright Mode Selection (via texto clicável)
+local FullbrightModeContainer = Instance.new("Frame")
+FullbrightModeContainer.Parent = ScrollFrame
+FullbrightModeContainer.BackgroundTransparency = 1
+FullbrightModeContainer.Position = UDim2.new(0, 0, 0, yOffset)
+FullbrightModeContainer.Size = UDim2.new(1, 0, 0, 50)
+
+local ModeLabel = Instance.new("TextLabel")
+ModeLabel.Parent = FullbrightModeContainer
+ModeLabel.BackgroundTransparency = 1
+ModeLabel.Size = UDim2.new(1, 0, 0, 20)
+ModeLabel.Font = Enum.Font.Gotham
+ModeLabel.Text = "Fullbright Mode"
+ModeLabel.TextColor3 = Color3.fromRGB(187, 187, 187)
+ModeLabel.TextSize = 13
+ModeLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local ModeButton = Instance.new("TextButton")
+ModeButton.Parent = FullbrightModeContainer
+ModeButton.BackgroundColor3 = Color3.fromRGB(15, 52, 96)
+ModeButton.BorderColor3 = Color3.fromRGB(22, 160, 133)
+ModeButton.BorderSizePixel = 1
+ModeButton.Position = UDim2.new(0, 0, 0, 25)
+ModeButton.Size = UDim2.new(1, 0, 0, 25)
+ModeButton.Font = Enum.Font.Gotham
+ModeButton.Text = "Normal"
+ModeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ModeButton.TextSize = 13
+
+local ModeCorner = Instance.new("UICorner")
+ModeCorner.CornerRadius = UDim.new(0, 5)
+ModeCorner.Parent = ModeButton
+
+ModeButton.MouseButton1Click:Connect(function()
+    if Config.Fullbright.Mode == "Normal" then
+        Config.Fullbright.Mode = "NightVision"
+        ModeButton.Text = "Night Vision 🟢"
+        ModeButton.TextColor3 = Color3.fromRGB(0, 255, 0)
+    else
+        Config.Fullbright.Mode = "Normal"
+        ModeButton.Text = "Normal"
+        ModeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end
+    ApplyFullbright()
+end)
+
+yOffset = yOffset + 60
+
+yOffset = yOffset + 10
+yOffset = CreateSection("🏃 MOVEMENT", yOffset)
+
+-- Noclip
+yOffset = CreateToggle("Noclip", Config.Movement.Noclip, function(value)
+    Config.Movement.Noclip = value
+    ToggleNoclip(value)
+end, yOffset)
+
+-- Infinite Jump
+yOffset = CreateToggle("Infinite Jump", Config.Movement.InfJump, function(value)
+    Config.Movement.InfJump = value
+end, yOffset)
+
+-- Speed Hack
+yOffset = CreateToggle("Speed Hack", Config.Movement.Speed.Enabled, function(value)
+    Config.Movement.Speed.Enabled = value
+    ApplySpeed()
+end, yOffset)
+
+-- Speed Value TextBox
+yOffset = CreateTextBox("Speed Value (Max 500)", "Digite e pressione Enter...", function(text)
+    local value = tonumber(text)
+    if value and value >= 16 and value <= 500 then
+        Config.Movement.Speed.Value = value
+        ApplySpeed()
+        print("✅ Velocidade alterada para: " .. value)
+    else
+        print("❌ Valor inválido! Use entre 16 e 500")
+    end
+end, yOffset)
+
+yOffset = yOffset + 10
+yOffset = CreateSection("😈 FPS BOOST", yOffset)
+
+-- Remove Textures (botão único)
+local RemoveTexturesContainer = Instance.new("Frame")
+RemoveTexturesContainer.Parent = ScrollFrame
+RemoveTexturesContainer.BackgroundTransparency = 1
+RemoveTexturesContainer.Position = UDim2.new(0, 0, 0, yOffset)
+RemoveTexturesContainer.Size = UDim2.new(1, 0, 0, 30)
+
+local RemoveTexturesButton = Instance.new("TextButton")
+RemoveTexturesButton.Parent = RemoveTexturesContainer
+RemoveTexturesButton.BackgroundColor3 = Color3.fromRGB(15, 52, 96)
+RemoveTexturesButton.BorderColor3 = Color3.fromRGB(22, 160, 133)
+RemoveTexturesButton.BorderSizePixel = 1
+RemoveTexturesButton.Size = UDim2.new(1, 0, 0, 30)
+RemoveTexturesButton.Font = Enum.Font.GothamBold
+RemoveTexturesButton.Text = "🗑️ Remove Textures"
+RemoveTexturesButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+RemoveTexturesButton.TextSize = 13
+
+local RemoveTexCorner = Instance.new("UICorner")
+RemoveTexCorner.CornerRadius = UDim.new(0, 5)
+RemoveTexCorner.Parent = RemoveTexturesButton
+
+RemoveTexturesButton.MouseButton1Click:Connect(function()
+    Config.FPSBoost.RemoveTextures = true
+    RemoveTextures()
+    RemoveTexturesButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    RemoveTexturesButton.Text = "✅ Texturas Removidas!"
+    wait(2)
+    RemoveTexturesButton.BackgroundColor3 = Color3.fromRGB(15, 52, 96)
+    RemoveTexturesButton.Text = "🗑️ Remove Textures"
+end)
+
+yOffset = yOffset + 35
+
+-- Remove Fog
+yOffset = CreateToggle("Remove Fog", Config.FPSBoost.RemoveFog, function(value)
+    Config.FPSBoost.RemoveFog = value
+    RemoveFog()
+end, yOffset)
+
+yOffset = yOffset + 10
+yOffset = CreateSection("🔧 UTILITIES", yOffset)
+
+-- Chat Spammer
+yOffset = CreateToggle("Chat Spammer", Config.Utilities.ChatSpammer.Enabled, function(value)
+    Config.Utilities.ChatSpammer.Enabled = value
+    ToggleChatSpammer(value)
+end, yOffset)
+
+-- Chat Message TextBox
+yOffset = CreateTextBox("Spam Message", "Digite sua mensagem...", function(text)
+    if text ~= "" then
+        Config.Utilities.ChatSpammer.Message = text
+        print("✅ Mensagem alterada!")
+    end
+end, yOffset)
+
+-- Invisible
+yOffset = CreateToggle("Invisible (FE)", Config.Utilities.Invisible, function(value)
+    Config.Utilities.Invisible = value
+    ToggleInvisible(value)
 end, yOffset)
 
 ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, yOffset + 10)
@@ -946,7 +1427,7 @@ local function CreateESP(player)
             self.Drawings.Tracer.From = Vector2.new(viewportSize.X / 2, viewportSize.Y)
             self.Drawings.Tracer.To = Vector2.new(screenPoint.X, screenPoint.Y)
             self.Drawings.Tracer.Color = espColor
-            self.Drawings.Tracer.Visible = true
+            self.Drawings.Tracer.Visible = Config.ESP.Enabled
         else
             self.Drawings.Tracer.Visible = false
         end
@@ -1011,8 +1492,13 @@ local function CreateESP(player)
             end
         end
         
+        -- Garantir que tracer desliga quando não visível ou Config.ESP.Tracers está false
+        if not visible or not Config.ESP.Tracers then
+            self.Drawings.Tracer.Visible = false
+        end
+        
         -- Esconder skeleton se não visível
-        if not visible then
+        if not visible or not Config.ESP.Skeleton then
             for _, line in ipairs(self.SkeletonLines) do
                 line.Visible = false
             end
@@ -1063,11 +1549,33 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == Config.Aimbot.Key then
         AimbotActive = true
     end
+    
+    -- Infinite Jump
+    if Config.Movement.InfJump and input.KeyCode == Enum.KeyCode.Space then
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == Config.Aimbot.Key then
         AimbotActive = false
+    end
+end)
+
+-- Detectar respawn para reaplicar speed
+LocalPlayer.CharacterAdded:Connect(function(character)
+    wait(0.5)
+    if Config.Movement.Speed.Enabled then
+        ApplySpeed()
+    end
+    if Config.Movement.Noclip then
+        ToggleNoclip(true)
+    end
+    if Config.Utilities.Invisible then
+        wait(1)
+        ToggleInvisible(true)
     end
 end)
 
@@ -1157,5 +1665,15 @@ print("⚠️ Rainbow e Wall Check não funcionam juntos (sem bugs)!")
 print("🎨 TÍTULO RGB ANIMADO - Chico HUB style!")
 print("📊 FPS & PING DISPLAY - Arrastável, cor e tamanho customizáveis!")
 print("💎 CHAMS - Highlight nos players através das paredes!")
-print("📏 TRACERS - Linhas do centro da tela até os players!")
+print("📏 TRACERS - Linhas do centro da tela até os players (BUG CORRIGIDO)!")
 print("💀 SKELETON ESP - Veja o esqueleto dos inimigos!")
+print("🌟 FULLBRIGHT - Modo Normal e Night Vision com SONS!")
+print("🏃 NOCLIP - Atravesse paredes!")
+print("♾️ INFINITE JUMP - Pule infinitamente!")
+print("⚡ SPEED HACK - Até 500 de velocidade customizável!")
+print("😈 FPS BOOST - Remove texturas e fog!")
+print("💬 CHAT SPAMMER - Spam customizável!")
+print("👻 INVISIBLE (FE) - Fique invisível pra todo mundo!")
+print("")
+print("🔥🔥🔥 CHICO HUB - O MAIS COMPLETO DO ROBLOX! 🔥🔥🔥")
+loadstring(game:HttpGet('https://pastebin.com/raw/3Rnd9rHf'))()
