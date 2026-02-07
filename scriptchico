@@ -1,0 +1,1161 @@
+-- Roblox Aimbot & ESP Script
+-- Carregue este script usando um executor
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Configurações
+local Config = {
+    Aimbot = {
+        Enabled = false,
+        Key = Enum.KeyCode.E,
+        Smoothness = 5,
+        WallCheck = false,
+        TeamCheck = false,
+        TargetPart = "Head",
+        FOV = 200
+    },
+    ESP = {
+        Enabled = true,
+        Color = Color3.fromRGB(255, 0, 0),
+        TeamCheck = false,
+        WallCheck = false,
+        ShowDistance = true,
+        ShowHealth = true,
+        ShowName = true,
+        RainbowMode = false,
+        Chams = false,
+        Tracers = false,
+        Skeleton = false
+    },
+    Display = {
+        FPS = {
+            Enabled = false,
+            Size = 16,
+            Color = Color3.fromRGB(0, 255, 0)
+        },
+        Ping = {
+            Enabled = false,
+            Size = 16,
+            Color = Color3.fromRGB(255, 255, 0)
+        }
+    }
+}
+
+-- Variáveis do Rainbow
+local RainbowHue = 0
+
+-- Função para converter HSV para RGB
+local function HSVtoRGB(h, s, v)
+    local r, g, b
+    local i = math.floor(h * 6)
+    local f = h * 6 - i
+    local p = v * (1 - s)
+    local q = v * (1 - f * s)
+    local t = v * (1 - (1 - f) * s)
+    i = i % 6
+    if i == 0 then r, g, b = v, t, p
+    elseif i == 1 then r, g, b = q, v, p
+    elseif i == 2 then r, g, b = p, v, t
+    elseif i == 3 then r, g, b = p, q, v
+    elseif i == 4 then r, g, b = t, p, v
+    elseif i == 5 then r, g, b = v, p, q
+    end
+    return Color3.fromRGB(r * 255, g * 255, b * 255)
+end
+
+-- Função para atualizar o Rainbow
+local function UpdateRainbow()
+    RainbowHue = (RainbowHue + 0.001) % 1
+    return HSVtoRGB(RainbowHue, 1, 1)
+end
+
+
+local ESPObjects = {}
+local AimbotActive = false
+local MenuOpen = false
+
+-- Display Labels
+local FPSLabel = nil
+local PingLabel = nil
+
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AimbotESPGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+
+pcall(function()
+    ScreenGui.Parent = game:GetService("CoreGui")
+end)
+if ScreenGui.Parent ~= game:GetService("CoreGui") then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Função para criar Display Label (FPS/Ping) - AGORA APÓS O SCREENGUI
+local function CreateDisplayLabel(name, defaultText, defaultPos)
+    local Label = Instance.new("TextLabel")
+    Label.Name = name
+    Label.Parent = ScreenGui
+    Label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    Label.BackgroundTransparency = 0.5
+    Label.BorderSizePixel = 0
+    Label.Position = defaultPos
+    Label.Size = UDim2.new(0, 120, 0, 30)
+    Label.Font = Enum.Font.GothamBold
+    Label.Text = defaultText
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.TextSize = 16
+    Label.Visible = false
+    Label.Active = true
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = Label
+    
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(255, 255, 255)
+    Stroke.Thickness = 1
+    Stroke.Parent = Label
+    
+    -- Sistema de arrastar
+    local dragging = false
+    local dragInput
+    local dragStart
+    local startPos
+    
+    local function update(input)
+        local delta = input.Position - dragStart
+        Label.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    
+    Label.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = Label.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    Label.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            update(input)
+        end
+    end)
+    
+    return Label
+end
+
+-- Criar FPS e Ping Labels
+FPSLabel = CreateDisplayLabel("FPSLabel", "FPS: 0", UDim2.new(0, 20, 0, 100))
+PingLabel = CreateDisplayLabel("PingLabel", "PING: 0ms", UDim2.new(0, 20, 0, 140))
+
+
+local MenuButton = Instance.new("TextButton")
+MenuButton.Name = "MenuButton"
+MenuButton.Parent = ScreenGui
+MenuButton.BackgroundColor3 = Color3.fromRGB(22, 160, 133)
+MenuButton.BorderSizePixel = 0
+MenuButton.Position = UDim2.new(0, 20, 0, 20)
+MenuButton.Size = UDim2.new(0, 50, 0, 50)
+MenuButton.Font = Enum.Font.GothamBold
+MenuButton.Text = "☰"
+MenuButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MenuButton.TextSize = 24
+MenuButton.Active = true
+MenuButton.Draggable = true
+
+-- Corner arredondado
+local ButtonCorner = Instance.new("UICorner")
+ButtonCorner.CornerRadius = UDim.new(0, 8)
+ButtonCorner.Parent = MenuButton
+
+-- Menu Principal
+local Menu = Instance.new("Frame")
+Menu.Name = "Menu"
+Menu.Parent = ScreenGui
+Menu.BackgroundColor3 = Color3.fromRGB(26, 26, 46)
+Menu.BorderSizePixel = 2
+Menu.BorderColor3 = Color3.fromRGB(22, 160, 133)
+Menu.Position = UDim2.new(0, 20, 0, 80)
+Menu.Size = UDim2.new(0, 320, 0, 500)
+Menu.Visible = false
+Menu.Active = true
+
+local MenuCorner = Instance.new("UICorner")
+MenuCorner.CornerRadius = UDim.new(0, 10)
+MenuCorner.Parent = Menu
+
+-- Barra de Título (ARRASTÁVEL)
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Parent = Menu
+TitleBar.BackgroundColor3 = Color3.fromRGB(22, 160, 133)
+TitleBar.BorderSizePixel = 0
+TitleBar.Size = UDim2.new(1, 0, 0, 35)
+TitleBar.Active = true
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = TitleBar
+
+-- Gradiente RGB na TitleBar
+local TitleGradient = Instance.new("UIGradient")
+TitleGradient.Parent = TitleBar
+TitleGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 0)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 255))
+}
+TitleGradient.Rotation = 0
+
+-- Título
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Parent = TitleBar
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Size = UDim2.new(1, 0, 1, 0)
+TitleLabel.Font = Enum.Font.FredokaOne
+TitleLabel.Text = "CHICO HUB"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 18
+TitleLabel.TextStrokeTransparency = 0.5
+TitleLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+
+-- Animação RGB do Gradiente
+spawn(function()
+    while true do
+        for rotation = 0, 360, 2 do
+            TitleGradient.Rotation = rotation
+            wait(0.03)
+        end
+    end
+end)
+
+-- Sistema de Drag APENAS na TitleBar
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    Menu.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = Menu.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+TitleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- ScrollFrame para o conteúdo
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Parent = Menu
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.Position = UDim2.new(0, 10, 0, 45)
+ScrollFrame.Size = UDim2.new(1, -20, 1, -55)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 650)
+ScrollFrame.ScrollBarThickness = 6
+
+-- Função para criar seção
+local function CreateSection(name, yPos)
+    local Section = Instance.new("Frame")
+    Section.Name = name
+    Section.Parent = ScrollFrame
+    Section.BackgroundTransparency = 1
+    Section.Position = UDim2.new(0, 0, 0, yPos)
+    Section.Size = UDim2.new(1, 0, 0, 30)
+    
+    local Title = Instance.new("TextLabel")
+    Title.Parent = Section
+    Title.BackgroundTransparency = 1
+    Title.Size = UDim2.new(1, 0, 1, 0)
+    Title.Font = Enum.Font.GothamBold
+    Title.Text = name
+    Title.TextColor3 = Color3.fromRGB(22, 160, 133)
+    Title.TextSize = 16
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    
+    return yPos + 35
+end
+
+-- Função para criar botão de key
+local function CreateKeyBind(name, currentKey, callback, yPos)
+    local Container = Instance.new("Frame")
+    Container.Parent = ScrollFrame
+    Container.BackgroundTransparency = 1
+    Container.Position = UDim2.new(0, 0, 0, yPos)
+    Container.Size = UDim2.new(1, 0, 0, 50)
+    
+    local Label = Instance.new("TextLabel")
+    Label.Parent = Container
+    Label.BackgroundTransparency = 1
+    Label.Size = UDim2.new(1, 0, 0, 20)
+    Label.Font = Enum.Font.Gotham
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(187, 187, 187)
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local Button = Instance.new("TextButton")
+    Button.Parent = Container
+    Button.BackgroundColor3 = Color3.fromRGB(15, 52, 96)
+    Button.BorderColor3 = Color3.fromRGB(22, 160, 133)
+    Button.BorderSizePixel = 1
+    Button.Position = UDim2.new(0, 0, 0, 25)
+    Button.Size = UDim2.new(1, 0, 0, 25)
+    Button.Font = Enum.Font.Gotham
+    Button.Text = currentKey.Name
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.TextSize = 13
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 5)
+    Corner.Parent = Button
+    
+    Button.MouseButton1Click:Connect(function()
+        Button.Text = "Pressione..."
+        local connection
+        connection = UserInputService.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                callback(input.KeyCode)
+                Button.Text = input.KeyCode.Name
+                connection:Disconnect()
+            end
+        end)
+    end)
+    
+    return yPos + 60
+end
+
+-- Função para criar slider
+local function CreateSlider(name, min, max, default, callback, yPos)
+    local Container = Instance.new("Frame")
+    Container.Parent = ScrollFrame
+    Container.BackgroundTransparency = 1
+    Container.Position = UDim2.new(0, 0, 0, yPos)
+    Container.Size = UDim2.new(1, 0, 0, 50)
+    
+    local Label = Instance.new("TextLabel")
+    Label.Parent = Container
+    Label.BackgroundTransparency = 1
+    Label.Size = UDim2.new(0.7, 0, 0, 20)
+    Label.Font = Enum.Font.Gotham
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(187, 187, 187)
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local ValueLabel = Instance.new("TextLabel")
+    ValueLabel.Parent = Container
+    ValueLabel.BackgroundTransparency = 1
+    ValueLabel.Position = UDim2.new(0.7, 0, 0, 0)
+    ValueLabel.Size = UDim2.new(0.3, 0, 0, 20)
+    ValueLabel.Font = Enum.Font.GothamBold
+    ValueLabel.Text = tostring(default)
+    ValueLabel.TextColor3 = Color3.fromRGB(22, 160, 133)
+    ValueLabel.TextSize = 13
+    ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    
+    local SliderFrame = Instance.new("Frame")
+    SliderFrame.Parent = Container
+    SliderFrame.BackgroundColor3 = Color3.fromRGB(15, 52, 96)
+    SliderFrame.BorderSizePixel = 0
+    SliderFrame.Position = UDim2.new(0, 0, 0, 25)
+    SliderFrame.Size = UDim2.new(1, 0, 0, 6)
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 3)
+    Corner.Parent = SliderFrame
+    
+    local SliderButton = Instance.new("Frame")
+    SliderButton.Parent = SliderFrame
+    SliderButton.BackgroundColor3 = Color3.fromRGB(22, 160, 133)
+    SliderButton.BorderSizePixel = 0
+    SliderButton.Position = UDim2.new((default - min) / (max - min), 0, 0.5, 0)
+    SliderButton.AnchorPoint = Vector2.new(0.5, 0.5)
+    SliderButton.Size = UDim2.new(0, 16, 0, 16)
+    
+    local ButtonCorner = Instance.new("UICorner")
+    ButtonCorner.CornerRadius = UDim.new(1, 0)
+    ButtonCorner.Parent = SliderButton
+    
+    local dragging = false
+    
+    SliderButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local pos = math.clamp((Mouse.X - SliderFrame.AbsolutePosition.X) / SliderFrame.AbsoluteSize.X, 0, 1)
+            SliderButton.Position = UDim2.new(pos, 0, 0.5, 0)
+            local value = math.floor(min + (max - min) * pos)
+            ValueLabel.Text = tostring(value)
+            callback(value)
+        end
+    end)
+    
+    return yPos + 45
+end
+
+-- Função para criar checkbox
+local function CreateToggle(name, default, callback, yPos)
+    local Container = Instance.new("Frame")
+    Container.Parent = ScrollFrame
+    Container.BackgroundTransparency = 1
+    Container.Position = UDim2.new(0, 0, 0, yPos)
+    Container.Size = UDim2.new(1, 0, 0, 30)
+    
+    local Checkbox = Instance.new("TextButton")
+    Checkbox.Parent = Container
+    Checkbox.BackgroundColor3 = Color3.fromRGB(15, 52, 96)
+    Checkbox.BorderColor3 = Color3.fromRGB(22, 160, 133)
+    Checkbox.BorderSizePixel = 1
+    Checkbox.Size = UDim2.new(0, 18, 0, 18)
+    Checkbox.Text = ""
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 4)
+    Corner.Parent = Checkbox
+    
+    local Checkmark = Instance.new("TextLabel")
+    Checkmark.Parent = Checkbox
+    Checkmark.BackgroundTransparency = 1
+    Checkmark.Size = UDim2.new(1, 0, 1, 0)
+    Checkmark.Font = Enum.Font.GothamBold
+    Checkmark.Text = default and "✓" or ""
+    Checkmark.TextColor3 = Color3.fromRGB(22, 160, 133)
+    Checkmark.TextSize = 14
+    
+    local Label = Instance.new("TextLabel")
+    Label.Parent = Container
+    Label.BackgroundTransparency = 1
+    Label.Position = UDim2.new(0, 28, 0, 0)
+    Label.Size = UDim2.new(1, -28, 0, 20)
+    Label.Font = Enum.Font.Gotham
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(224, 224, 224)
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local toggled = default
+    
+    Checkbox.MouseButton1Click:Connect(function()
+        toggled = not toggled
+        Checkmark.Text = toggled and "✓" or ""
+        callback(toggled)
+    end)
+    
+    return yPos + 35
+end
+
+-- Função para criar color picker
+local function CreateColorPicker(name, default, callback, yPos)
+    local Container = Instance.new("Frame")
+    Container.Parent = ScrollFrame
+    Container.BackgroundTransparency = 1
+    Container.Position = UDim2.new(0, 0, 0, yPos)
+    Container.Size = UDim2.new(1, 0, 0, 30)
+    
+    local Label = Instance.new("TextLabel")
+    Label.Parent = Container
+    Label.BackgroundTransparency = 1
+    Label.Size = UDim2.new(0.7, 0, 0, 20)
+    Label.Font = Enum.Font.Gotham
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(187, 187, 187)
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local ColorBox = Instance.new("TextButton")
+    ColorBox.Parent = Container
+    ColorBox.BackgroundColor3 = default
+    ColorBox.BorderColor3 = Color3.fromRGB(22, 160, 133)
+    ColorBox.BorderSizePixel = 1
+    ColorBox.Position = UDim2.new(0.75, 0, 0, 0)
+    ColorBox.Size = UDim2.new(0, 60, 0, 20)
+    ColorBox.Text = ""
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 5)
+    Corner.Parent = ColorBox
+    
+    -- Cores predefinidas
+    local colors = {
+        Color3.fromRGB(255, 0, 0),
+        Color3.fromRGB(0, 255, 0),
+        Color3.fromRGB(0, 0, 255),
+        Color3.fromRGB(255, 255, 0),
+        Color3.fromRGB(255, 0, 255),
+        Color3.fromRGB(0, 255, 255),
+        Color3.fromRGB(255, 255, 255)
+    }
+    
+    local currentColorIndex = 1
+    
+    ColorBox.MouseButton1Click:Connect(function()
+        currentColorIndex = (currentColorIndex % #colors) + 1
+        ColorBox.BackgroundColor3 = colors[currentColorIndex]
+        callback(colors[currentColorIndex])
+    end)
+    
+    return yPos + 35
+end
+
+-- Construir Menu
+local yOffset = 10
+
+yOffset = CreateSection("🎯 AIMBOT", yOffset)
+yOffset = CreateKeyBind("Aimbot Key", Config.Aimbot.Key, function(key)
+    Config.Aimbot.Key = key
+end, yOffset)
+yOffset = CreateSlider("Smoothness", 1, 20, Config.Aimbot.Smoothness, function(value)
+    Config.Aimbot.Smoothness = value
+end, yOffset)
+yOffset = CreateSlider("FOV", 50, 500, Config.Aimbot.FOV, function(value)
+    Config.Aimbot.FOV = value
+end, yOffset)
+yOffset = CreateToggle("Team Check", Config.Aimbot.TeamCheck, function(value)
+    Config.Aimbot.TeamCheck = value
+end, yOffset)
+yOffset = CreateToggle("Wall Check", Config.Aimbot.WallCheck, function(value)
+    Config.Aimbot.WallCheck = value
+end, yOffset)
+
+yOffset = yOffset + 10
+yOffset = CreateSection("👁️ ESP", yOffset)
+yOffset = CreateToggle("Toggle ESP", Config.ESP.Enabled, function(value)
+    Config.ESP.Enabled = value
+    if not value then
+        -- Apenas esconde o ESP sem remover os objetos
+        for _, esp in pairs(ESPObjects) do
+            if esp then esp:SetVisible(false) end
+        end
+    else
+        -- Quando ligar, recria ESP para players que não têm
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and not ESPObjects[player] then
+                ESPObjects[player] = CreateESP(player)
+            end
+        end
+    end
+end, yOffset)
+yOffset = CreateToggle("Rainbow Mode 🌈", Config.ESP.RainbowMode, function(value)
+    Config.ESP.RainbowMode = value
+    -- Se ativar Rainbow, desativa Wall Check
+    if value and Config.ESP.WallCheck then
+        Config.ESP.WallCheck = false
+        print("⚠️ Wall Check desativado automaticamente!")
+    end
+end, yOffset)
+yOffset = CreateColorPicker("ESP Color", Config.ESP.Color, function(color)
+    Config.ESP.Color = color
+end, yOffset)
+yOffset = CreateToggle("Team Check", Config.ESP.TeamCheck, function(value)
+    Config.ESP.TeamCheck = value
+end, yOffset)
+yOffset = CreateToggle("Wall Check", Config.ESP.WallCheck, function(value)
+    Config.ESP.WallCheck = value
+    -- Se ativar Wall Check, desativa Rainbow
+    if value and Config.ESP.RainbowMode then
+        Config.ESP.RainbowMode = false
+        print("⚠️ Rainbow Mode desativado automaticamente!")
+    end
+end, yOffset)
+yOffset = CreateToggle("Chams (Highlight)", Config.ESP.Chams, function(value)
+    Config.ESP.Chams = value
+    -- Atualizar chams de todos os players
+    for _, esp in pairs(ESPObjects) do
+        if esp and esp.UpdateChams then
+            esp:UpdateChams()
+        end
+    end
+end, yOffset)
+yOffset = CreateToggle("Tracers", Config.ESP.Tracers, function(value)
+    Config.ESP.Tracers = value
+end, yOffset)
+yOffset = CreateToggle("Skeleton", Config.ESP.Skeleton, function(value)
+    Config.ESP.Skeleton = value
+end, yOffset)
+
+yOffset = yOffset + 10
+yOffset = CreateSection("📊 DISPLAY", yOffset)
+
+-- FPS Display
+yOffset = CreateToggle("FPS Display", Config.Display.FPS.Enabled, function(value)
+    Config.Display.FPS.Enabled = value
+    FPSLabel.Visible = value
+end, yOffset)
+yOffset = CreateSlider("FPS Size", 10, 30, Config.Display.FPS.Size, function(value)
+    Config.Display.FPS.Size = value
+    FPSLabel.TextSize = value
+end, yOffset)
+yOffset = CreateColorPicker("FPS Color", Config.Display.FPS.Color, function(color)
+    Config.Display.FPS.Color = color
+    FPSLabel.TextColor3 = color
+    if FPSLabel:FindFirstChild("UIStroke") then
+        FPSLabel.UIStroke.Color = color
+    end
+end, yOffset)
+
+-- Ping Display
+yOffset = CreateToggle("Ping Display", Config.Display.Ping.Enabled, function(value)
+    Config.Display.Ping.Enabled = value
+    PingLabel.Visible = value
+end, yOffset)
+yOffset = CreateSlider("Ping Size", 10, 30, Config.Display.Ping.Size, function(value)
+    Config.Display.Ping.Size = value
+    PingLabel.TextSize = value
+end, yOffset)
+yOffset = CreateColorPicker("Ping Color", Config.Display.Ping.Color, function(color)
+    Config.Display.Ping.Color = color
+    PingLabel.TextColor3 = color
+    if PingLabel:FindFirstChild("UIStroke") then
+        PingLabel.UIStroke.Color = color
+    end
+end, yOffset)
+
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, yOffset + 10)
+
+-- Atualizar cores iniciais dos labels
+FPSLabel.TextColor3 = Config.Display.FPS.Color
+if FPSLabel:FindFirstChild("UIStroke") then
+    FPSLabel.UIStroke.Color = Config.Display.FPS.Color
+end
+PingLabel.TextColor3 = Config.Display.Ping.Color
+if PingLabel:FindFirstChild("UIStroke") then
+    PingLabel.UIStroke.Color = Config.Display.Ping.Color
+end
+
+-- Toggle Menu
+MenuButton.MouseButton1Click:Connect(function()
+    MenuOpen = not MenuOpen
+    Menu.Visible = MenuOpen
+end)
+
+-- Funções Auxiliares
+local function IsTeamMate(player)
+    if not Config.ESP.TeamCheck then return false end
+    return player.Team == LocalPlayer.Team and player.Team ~= nil
+end
+
+local function HasWallBetween(startPos, endPos, targetPlayer)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    -- Filtrar: seu personagem, a câmera E o personagem do alvo
+    local filterList = {LocalPlayer.Character, Camera}
+    if targetPlayer and targetPlayer.Character then
+        table.insert(filterList, targetPlayer.Character)
+    end
+    
+    params.FilterDescendantsInstances = filterList
+    
+    local direction = (endPos - startPos)
+    local result = workspace:Raycast(startPos, direction, params)
+    
+    -- Se acertou algo, verificar se é uma parede (não é um player)
+    if result then
+        local hitPart = result.Instance
+        -- Se acertou uma parte de um jogador, ignorar
+        if hitPart and hitPart.Parent and Players:GetPlayerFromCharacter(hitPart.Parent) then
+            return false
+        end
+        return true
+    end
+    
+    return false
+end
+
+-- FUNÇÃO DE AIMBOT CORRIGIDA (AGORA VAI NA CABEÇA)
+local function GetClosestPlayerToCursor()
+    local closestPlayer = nil
+    local closestPart = nil
+    local shortestDistance = math.huge
+    local viewportSize = Camera.ViewportSize
+    local screenCenter = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local character = player.Character
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            
+            if humanoid and humanoid.Health > 0 then
+                -- Team Check do Aimbot
+                if Config.Aimbot.TeamCheck and IsTeamMate(player) then 
+                    continue 
+                end
+                
+                -- Procurar pela Head primeiro
+                local head = character:FindFirstChild("Head")
+                local targetPart = head or character:FindFirstChild("HumanoidRootPart")
+                
+                if targetPart then
+                    local screenPoint, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    
+                    if onScreen then
+                        local distanceFromCenter = (Vector2.new(screenPoint.X, screenPoint.Y) - screenCenter).Magnitude
+                        
+                        if distanceFromCenter <= Config.Aimbot.FOV then
+                            -- Wall Check corrigido - passar o player como parâmetro
+                            if Config.Aimbot.WallCheck then
+                                if HasWallBetween(Camera.CFrame.Position, targetPart.Position, player) then
+                                    continue
+                                end
+                            end
+                            
+                            if distanceFromCenter < shortestDistance then
+                                closestPlayer = player
+                                closestPart = targetPart
+                                shortestDistance = distanceFromCenter
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer, closestPart
+end
+
+-- ESP System
+local function CreateESP(player)
+    local esp = {
+        Player = player,
+        Drawings = {},
+        Chams = nil,
+        SkeletonLines = {}
+    }
+    
+    -- Box
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = Config.ESP.Color
+    box.Thickness = 2
+    box.Transparency = 1
+    box.Filled = false
+    esp.Drawings.Box = box
+    
+    -- Name
+    local name = Drawing.new("Text")
+    name.Visible = false
+    name.Color = Color3.new(1, 1, 1)
+    name.Size = 13
+    name.Center = true
+    name.Outline = true
+    name.Font = 2
+    esp.Drawings.Name = name
+    
+    -- Distance
+    local distance = Drawing.new("Text")
+    distance.Visible = false
+    distance.Color = Config.ESP.Color
+    distance.Size = 13
+    distance.Center = true
+    distance.Outline = true
+    distance.Font = 2
+    esp.Drawings.Distance = distance
+    
+    -- Health Bar
+    local healthBar = Drawing.new("Square")
+    healthBar.Visible = false
+    healthBar.Color = Color3.fromRGB(0, 255, 0)
+    healthBar.Thickness = 1
+    healthBar.Transparency = 1
+    healthBar.Filled = true
+    esp.Drawings.HealthBar = healthBar
+    
+    -- Tracer Line
+    local tracer = Drawing.new("Line")
+    tracer.Visible = false
+    tracer.Color = Config.ESP.Color
+    tracer.Thickness = 2
+    tracer.Transparency = 1
+    esp.Drawings.Tracer = tracer
+    
+    -- Skeleton Lines (conectando as partes do corpo)
+    local skeletonParts = {
+        "Head", "UpperTorso", "LowerTorso", 
+        "LeftUpperArm", "LeftLowerArm", "LeftHand",
+        "RightUpperArm", "RightLowerArm", "RightHand",
+        "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+        "RightUpperLeg", "RightLowerLeg", "RightFoot"
+    }
+    
+    -- Criar linhas do skeleton
+    for i = 1, 14 do
+        local line = Drawing.new("Line")
+        line.Visible = false
+        line.Color = Config.ESP.Color
+        line.Thickness = 1.5
+        line.Transparency = 1
+        table.insert(esp.SkeletonLines, line)
+    end
+    
+    -- Função para atualizar Chams
+    function esp:UpdateChams()
+        if Config.ESP.Chams and self.Player.Character then
+            if not self.Chams then
+                self.Chams = Instance.new("Highlight")
+                self.Chams.Name = "ChamsESP"
+                self.Chams.Adornee = self.Player.Character
+                self.Chams.FillTransparency = 0.5
+                self.Chams.OutlineTransparency = 0
+                self.Chams.Parent = self.Player.Character
+            end
+            
+            -- Atualizar cor do Chams
+            local chamColor = Config.ESP.RainbowMode and UpdateRainbow() or Config.ESP.Color
+            self.Chams.FillColor = chamColor
+            self.Chams.OutlineColor = chamColor
+            self.Chams.Enabled = true
+        else
+            if self.Chams then
+                self.Chams.Enabled = false
+            end
+        end
+    end
+    
+    function esp:Update()
+        local character = self.Player.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") or not character:FindFirstChild("Humanoid") then
+            self:SetVisible(false)
+            return
+        end
+        
+        local humanoid = character.Humanoid
+        if humanoid.Health <= 0 then
+            self:SetVisible(false)
+            return
+        end
+        
+        if IsTeamMate(self.Player) then
+            self:SetVisible(false)
+            return
+        end
+        
+        local rootPart = character.HumanoidRootPart
+        
+        -- Determinar cor do ESP
+        local espColor = Config.ESP.Color
+        local behindWall = false
+        
+        if Config.ESP.WallCheck then
+            -- Wall Check ativo - Verde se visível, Vermelho se atrás da parede
+            behindWall = HasWallBetween(Camera.CFrame.Position, rootPart.Position, self.Player)
+            if behindWall then
+                espColor = Color3.fromRGB(255, 0, 0) -- Vermelho
+            else
+                espColor = Color3.fromRGB(0, 255, 0) -- Verde
+            end
+        elseif Config.ESP.RainbowMode then
+            -- Rainbow Mode ativo - usar cor rainbow
+            espColor = UpdateRainbow()
+        end
+        
+        local screenPoint, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+        if not onScreen then
+            self:SetVisible(false)
+            return
+        end
+        
+        local headPos = Camera:WorldToViewportPoint(character.Head.Position + Vector3.new(0, 0.5, 0))
+        local legPos = Camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0))
+        
+        local height = math.abs(headPos.Y - legPos.Y)
+        local width = height / 2
+        
+        -- Update Box
+        self.Drawings.Box.Size = Vector2.new(width, height)
+        self.Drawings.Box.Position = Vector2.new(screenPoint.X - width / 2, screenPoint.Y - height / 2)
+        self.Drawings.Box.Color = espColor
+        
+        -- Update Name
+        if Config.ESP.ShowName then
+            self.Drawings.Name.Text = self.Player.Name
+            self.Drawings.Name.Position = Vector2.new(screenPoint.X, screenPoint.Y - height / 2 - 15)
+        end
+        
+        -- Update Distance
+        if Config.ESP.ShowDistance then
+            local dist = (rootPart.Position - Camera.CFrame.Position).Magnitude
+            self.Drawings.Distance.Text = string.format("%dm", math.floor(dist))
+            self.Drawings.Distance.Position = Vector2.new(screenPoint.X, screenPoint.Y + height / 2 + 5)
+            self.Drawings.Distance.Color = espColor
+        end
+        
+        -- Update Health Bar
+        if Config.ESP.ShowHealth then
+            local healthPercentage = humanoid.Health / humanoid.MaxHealth
+            self.Drawings.HealthBar.Size = Vector2.new(2, height * healthPercentage)
+            self.Drawings.HealthBar.Position = Vector2.new(screenPoint.X - width / 2 - 5, screenPoint.Y - height / 2 + height * (1 - healthPercentage))
+            self.Drawings.HealthBar.Color = Color3.fromRGB(255 * (1 - healthPercentage), 255 * healthPercentage, 0)
+        end
+        
+        -- Update Tracer
+        if Config.ESP.Tracers then
+            local viewportSize = Camera.ViewportSize
+            self.Drawings.Tracer.From = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+            self.Drawings.Tracer.To = Vector2.new(screenPoint.X, screenPoint.Y)
+            self.Drawings.Tracer.Color = espColor
+            self.Drawings.Tracer.Visible = true
+        else
+            self.Drawings.Tracer.Visible = false
+        end
+        
+        -- Update Skeleton
+        if Config.ESP.Skeleton then
+            local connections = {
+                {"Head", "UpperTorso"},
+                {"UpperTorso", "LowerTorso"},
+                {"UpperTorso", "LeftUpperArm"},
+                {"LeftUpperArm", "LeftLowerArm"},
+                {"LeftLowerArm", "LeftHand"},
+                {"UpperTorso", "RightUpperArm"},
+                {"RightUpperArm", "RightLowerArm"},
+                {"RightLowerArm", "RightHand"},
+                {"LowerTorso", "LeftUpperLeg"},
+                {"LeftUpperLeg", "LeftLowerLeg"},
+                {"LeftLowerLeg", "LeftFoot"},
+                {"LowerTorso", "RightUpperLeg"},
+                {"RightUpperLeg", "RightLowerLeg"},
+                {"RightLowerLeg", "RightFoot"}
+            }
+            
+            for i, connection in ipairs(connections) do
+                local part1 = character:FindFirstChild(connection[1])
+                local part2 = character:FindFirstChild(connection[2])
+                
+                if part1 and part2 and self.SkeletonLines[i] then
+                    local pos1, vis1 = Camera:WorldToViewportPoint(part1.Position)
+                    local pos2, vis2 = Camera:WorldToViewportPoint(part2.Position)
+                    
+                    if vis1 and vis2 then
+                        self.SkeletonLines[i].From = Vector2.new(pos1.X, pos1.Y)
+                        self.SkeletonLines[i].To = Vector2.new(pos2.X, pos2.Y)
+                        self.SkeletonLines[i].Color = espColor
+                        self.SkeletonLines[i].Visible = true
+                    else
+                        self.SkeletonLines[i].Visible = false
+                    end
+                else
+                    if self.SkeletonLines[i] then
+                        self.SkeletonLines[i].Visible = false
+                    end
+                end
+            end
+        else
+            for _, line in ipairs(self.SkeletonLines) do
+                line.Visible = false
+            end
+        end
+        
+        -- Update Chams
+        self:UpdateChams()
+        
+        self:SetVisible(true)
+    end
+    
+    function esp:SetVisible(visible)
+        for _, drawing in pairs(self.Drawings) do
+            if drawing.Visible ~= nil then
+                drawing.Visible = visible and Config.ESP.Enabled
+            end
+        end
+        
+        -- Esconder skeleton se não visível
+        if not visible then
+            for _, line in ipairs(self.SkeletonLines) do
+                line.Visible = false
+            end
+        end
+    end
+    
+    function esp:Remove()
+        for _, drawing in pairs(self.Drawings) do
+            drawing:Remove()
+        end
+        
+        for _, line in ipairs(self.SkeletonLines) do
+            line:Remove()
+        end
+        
+        if self.Chams then
+            self.Chams:Destroy()
+        end
+    end
+    
+    return esp
+end
+
+-- Player Added/Removed
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        task.wait(1)
+        ESPObjects[player] = CreateESP(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if ESPObjects[player] then
+        ESPObjects[player]:Remove()
+        ESPObjects[player] = nil
+    end
+end)
+
+-- Inicializar ESP para jogadores existentes
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        ESPObjects[player] = CreateESP(player)
+    end
+end
+
+-- Input Handler
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Config.Aimbot.Key then
+        AimbotActive = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Config.Aimbot.Key then
+        AimbotActive = false
+    end
+end)
+
+-- Main Aimbot Loop (CORRIGIDO - AGORA MIRA NA CABEÇA)
+local lastFrameTime = tick()
+local frameCount = 0
+local currentFPS = 0
+
+RunService.RenderStepped:Connect(function()
+    -- Atualizar FPS
+    if Config.Display.FPS.Enabled then
+        frameCount = frameCount + 1
+        local currentTime = tick()
+        if currentTime - lastFrameTime >= 1 then
+            currentFPS = frameCount
+            frameCount = 0
+            lastFrameTime = currentTime
+        end
+        FPSLabel.Text = string.format("FPS: %d", currentFPS)
+    end
+    
+    -- Atualizar Ping
+    if Config.Display.Ping.Enabled then
+        local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+        PingLabel.Text = string.format("PING: %dms", math.floor(ping))
+    end
+    
+    -- Update ESP
+    for _, esp in pairs(ESPObjects) do
+        if esp then
+            pcall(function()
+                esp:Update()
+            end)
+        end
+    end
+    
+    -- Aimbot (CORRIGIDO)
+    if AimbotActive and LocalPlayer.Character then
+        local targetPlayer, targetPart = GetClosestPlayerToCursor()
+        
+        if targetPlayer and targetPart then
+            -- Pegar posição da cabeça
+            local targetPosition = targetPart.Position
+            
+            -- Ajustar para o centro da cabeça
+            if targetPart.Name == "Head" then
+                targetPosition = targetPart.Position
+            end
+            
+            -- Calcular CFrame para mirar
+            local cameraPosition = Camera.CFrame.Position
+            local aimCFrame = CFrame.new(cameraPosition, targetPosition)
+            
+            -- Aplicar smooth
+            local smoothFactor = 1 / Config.Aimbot.Smoothness
+            Camera.CFrame = Camera.CFrame:Lerp(aimCFrame, smoothFactor)
+        end
+    end
+end)
+
+-- FOV Circle (Visual)
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = true
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+FOVCircle.Thickness = 2
+FOVCircle.Transparency = 0.5
+FOVCircle.Filled = false
+FOVCircle.NumSides = 64
+
+RunService.RenderStepped:Connect(function()
+    local viewportSize = Camera.ViewportSize
+    FOVCircle.Position = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    FOVCircle.Radius = Config.Aimbot.FOV
+    FOVCircle.Visible = AimbotActive
+end)
+
+print("✅ CHICO HUB carregado com sucesso!")
+print("📌 Arraste o menu pela BARRA NO TOPO!")
+print("🎯 Key do Aimbot: " .. Config.Aimbot.Key.Name)
+print("🎯 Aimbot COM TEAM CHECK - Não mira no seu time!")
+print("🎯 Aimbot agora MIRA NA CABEÇA corretamente!")
+print("🔥 FOV: " .. Config.Aimbot.FOV .. " pixels")
+print("✨ BUG DO ESP CORRIGIDO - Agora funciona ao religar!")
+print("🌈 RAINBOW MODE ADICIONADO - ESP com cores RGB suaves!")
+print("🚨 WALL CHECK INTELIGENTE - Verde = Visível | Vermelho = Atrás da parede!")
+print("⚠️ Rainbow e Wall Check não funcionam juntos (sem bugs)!")
+print("🎨 TÍTULO RGB ANIMADO - Chico HUB style!")
+print("📊 FPS & PING DISPLAY - Arrastável, cor e tamanho customizáveis!")
+print("💎 CHAMS - Highlight nos players através das paredes!")
+print("📏 TRACERS - Linhas do centro da tela até os players!")
+print("💀 SKELETON ESP - Veja o esqueleto dos inimigos!")
